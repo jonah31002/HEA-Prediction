@@ -1,0 +1,909 @@
+---
+title: '**基於高熵合金比例之材料特性參數預測**'
+subtitle: "**Statistical Learning Final Project**"
+author: "109011129郭庭安、111011701張中立、111011901 張侑勛"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    keep_tex: yes
+    fig_caption: yes
+    toc: true
+    toc_depth: 4
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{xeCJK}
+- \usepackage{fontspec}
+- \setCJKmainfont{Noto Serif TC}
+- \XeTeXlinebreaklocale "zh"
+- \XeTeXlinebreakskip = 0pt plus 1pt
+geometry: left=2cm,right=2cm,top=1.5cm,bottom=1.5cm
+fontsize: 12pt
+papersize: a4
+linestretch: 1.25
+editor_options: 
+  chunk_output_type: console
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(width = 75)
+options(warn=-1)
+options(digits=4) 
+library(knitr)
+library(corrplot)
+library(e1071)
+library(magrittr)
+library(ggplot2)
+library(readxl)
+library(olsrr)
+library(car) 
+library(caret) 
+```
+
+## **摘要**
+
+|      高熵合金(High Entropy Alloy, HEA)是一種相對較新的合金類型，由多種元素組成的特性，使其具有穩定、高硬度、良好熱穩定性、抗腐蝕的特性。其中高熵合金的熱膨脹係數是目前學界與業界會關注的特性，低熱膨脹係數使合金在溫度遽變的情況下仍保有穩定性，特別適用於航空載具等需要高溫穩定性的應用。本期末專題取用過往期刊所發表的數據，藉由機器學習的分類與回歸方法，透過不同金屬元素的重量比例，預設高熵合金的熱膨脹係數。最終使用K-近鄰演算法先行分類，再根據類別高低分別使用不同的XGBoost回歸模型，以預測熱膨脹係數的數值。最終模型在測試及上的均方誤差為5.558。我們希望藉由特性參數的預測模型，在高熵合金的製程上提供輔助，以減少在製備時進行反覆試驗所耗費的時間與金錢成本。
+
+
+\newpage
+## **一、緒論**
+
+|      高熵合金 (High Entropy Alloy, HEA) 是一種相對新興的合金材料類別，其特點是成分中包含多種元素，通常由五種或五種以上的元素組成，而且這些元素的濃度相當均勻。這種成分均勻性是高熵合金區別於傳統合金的主要特點之一。傳統合金通常由主要元素和少量的合金元素組成，如會以鐵為基礎，再加入一些微量元素（碳、錳等）來提昇其特性，然而所得的還是以鐵為主的合金；而高熵合金則採用了更複雜的成分設計，具有更為均勻的成分分佈。這些合金的名稱中的「高熵」一詞源於熱力學上的概念，指的是體系中元素的無序性，在高熵合金中，元素的無序性體現為成分的均勻分佈，這有助於提高材料的穩定性和性能。由多種元素組成的特性，高熵合金可以透過適當元素比例的調配，製成具有高硬度、良好熱穩定性、抗腐蝕及抗氧化的金屬材料，相較傳統合金有更廣泛、更多元的應用，如抗氧化耐高溫的儲能材料、生物相容性材料的製備等。由於高熵合金的成分分佈均勻，因此具有低熱膨脹係數的優勢。熱膨脹係數是指材料在受熱作用時，其體積變化的比例。高熵合金中元素的均勻分佈有助於減少因熱脹冷縮而引起的應力和變形，這使得高熵合金在溫度變化劇烈的環境中表現出色。低熱膨脹係數確保了高熵合金在高溫條件下的穩定性，特別適用於航空載具等需要高溫穩定性的應用。
+
+|      雖然高熵合金的組成可以包含各種元素，並以不同的比例搭配，相較於傳統合金，這種多樣性提供了提升合金性能的機會，但也同時增加了尋找最佳合金組成比例的挑戰。目前常見的高熵合金設計採用特定比例的元素組合，然而透過這種方法所設計的新合金性能並未顯著超越傳統合金。
+
+|      近年來，研究人員開始探索利用機器學習和人工智慧技術進行材料開發設計。Balachandran等學者運用支持向量分類器(support vector machine)和支持向量迴歸模型(support vector regression)，成功找出未被發現的鐵電鈣鈦礦元素組合，以滿足高居禮溫度(Curie temperature)的要求。而He等研究者則運用最近鄰居法(k-nearest neighbors)和支持向量迴歸模型，辨識出影響鐵電材料殘餘極化的三個重要因子：電負度（Martynov-Batsanov electronegativity）、價電子數與額定電荷之比(ratio of valence electron number to nominal charge)以及核心電子距離(charge and the core electron distance)。這些實例充分顯示了人工智慧技術在材料開發設計上的應用潛力。
+
+|      本期末專題將致力於開發一套針對高熵合金的參數推薦系統，透過機器學習模型的協助，利用各種合金元素的重量百分比來預測高熵合金的材料特性。為了建構高熵合金輔助模型，我們使用了過去刊物中發表的文獻作為訓練和測試資料集，透過各個元素的重量百分比，希望擬合熱膨脹系數(thermal expansion coefficients, TEC)的特性參數，在未來透過模型找出在受熱時尺寸變化的程度相對較小的合金組合，加速高熵合金材料的設計。
+
+|      本報告將針對適用於高熵合金的機器學習輔助模型進行詳細說明，各章節概要如下：首先將介紹資料集與資料拆分方式，接著介紹我們嘗試的實驗方法，並針對預測效果最佳的模型進行解析，最後探討機器學習模型於本高熵合金數據中的適用性。
+
+## **二、資料分析**
+
+### **2.1 資料集介紹**
+
+|      本次期末專題中使用的高熵合金數據，來自Rao等人於Science期刊發表的文章``Machine learning–enabled high-entropy alloy discovery"。作者在文章中以深度學習方法，結合密度泛函理論、熱力學的計算與實際實驗製程，從廣大的參數搭配中找出極低熱膨脹系數的高熵合金。
+
+|      高熵合金的數據集提供於該期刊中的補充資料中，作者蒐集過往期刊發表的實際數據，並加上數比由作者團隊自行冶煉的高熵合金，作為數據集進行後續深入分析。期刊中作者提出的方法較為複雜，包含了GM與Autoencoder、NN的方法；而我們希望基於統計學習課程的基礎，利用過去學習的方法，透過各種元素的重量比例，預測合金的熱膨脹係數。
+
+|      期刊補充資料中的高熵合金資料集總計包含了717筆實驗資料，每筆資料中有21個變數，前五筆資料內容如下：
+```{r, 2_data1, echo=F, fig.align='center', fig.width=9, fig.height=6}
+### Load Data
+HEA_data <- read_excel("Data_base.xlsx")
+HEA_data = HEA_data[,2:22]
+cat('Dimension of the Dataset: ', dim(HEA_data))
+```
+
+```{r, 2_data2, echo=F, fig.align='center', fig.width=9, fig.height=6}
+### View Data
+kable(head(HEA_data[,1:11], n=5))
+kable(head(HEA_data[,12:21], n=5))
+```
+其中21個變數各項說明如下：
+
+- Fe, Ni, Co, Cr, V, Cu: 各項元素之重量百分比例，元素中文依序為鐵、鎳、鈷、鉻、釩、銅，單位為$\mathrm{wt}\ \%$。
+- VEC: Valence electron concentration，價電子濃度。
+- AR1: Atomic radius (empirical)，原子半徑(實際實驗數值)，單位為pm。
+- AR2: Covalent radius，共價半徑，單位為pm。
+- PE: Pauling electronegativity，鮑林之相對電負度。
+- Density：密度。
+- TermalC: Thermal conductivity，熱導率。
+- MP: Melting point，熔點。
+- FI: First ionization energy，第一游離能。
+- SI: Second ionization energy，第二游離能。
+- TI: Third ionization energy，第三游離能。
+- M: Magnetic moment，磁矩。
+- TEC: Thermal expansion coefficient，熱膨脹系數，單位為$\times 10^{-6}/\mathrm K$。
+- TC: Curie temperature，居禮溫度，單位為pm。
+- MS: Magnetization (Bohr magneton)，波耳磁子磁化強度。
+- MagS: Magnetostriction，磁致伸縮。
+
+|      由於本次期末專題的目的在於探討高熵合金設計輔助系統的可行性，因此我們選用各元素之比例做為模型輸入特徵/預測變數(predictor)，搭配各項其他特性參數作為反應變數(response)，其中反應變數以熱膨脹係數作為主要關注的特性參數，並搭配探討其他合金性質參數。
+
+### **2.2 資料集概要分析**
+
+|      針對獲得的高熵合金資料集，首先檢視資料是否有缺失值：
+```{r, 2_summary, echo=F, fig.align='center', fig.width=8, fig.height=6}
+### Summary
+# summary(HEA_data, n=5)
+### Check Loss Data
+cat("Sum of NA elements in dataset:")
+colSums(is.na(HEA_data))
+```
+確認資料集中皆無缺失值後，檢視個別資料變數的數值分佈情形，與兩兩變數之間的相關性：
+
+i. **個別變數分布情形**
+
+|      以下繪製各個元素重量百分比例，與目標性質參數TEC的Histogram分佈圖形，並統計717筆實驗資料中，各高熵合金中各個元素出現的次數：
+```{r, 2_plot1, echo=F, fig.align='center', fig.width=8, fig.height=6}
+### View Histogram
+hist.feat = c('Fe', 'Ni', 'Co', 'TEC','Cr', 'V', 'Cu')
+par(mfrow = c(2,4), mar = c(3,3,2,1), mgp = c(1.8, 0.5, 0))
+for (features in hist.feat){
+  hist(HEA_data[[features]], breaks = 20, 
+       main = paste("Histogram of", features), xlab = features, ylab = "counts", 
+       cex.lab = 1.5, font.lab = 2, cex.main=1.8)
+}
+```
+
+```{r, 2_plot2, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### View Bar Chart
+elem.count = colSums(HEA_data != 0)[1:6]
+elem.count = c(dim(HEA_data)[1], elem.count)
+names(elem.count)[1] = 'All Data'
+par(mfrow = c(1,1), mar=c(3.2,3.2,0.5,0.5), mgp=c(1.8,0.5,0))
+text(x = barplot(elem.count, col = "steelblue", 
+                 xlab = "Elements", ylab = "Numbers of HEAs", 
+                 ylim = c(0, max(elem.count) * 1.2),
+                 cex.main = 1.5, cex.lab = 1.2, cex.axis = 1.2),
+     y = elem.count + 1, labels = elem.count, pos = 3, cex = 1.2, col = "black"
+)
+```
+檢視上方圖表，發現多數合金資料皆有包含鐵、鈷、鎳的元素，其中鐵元素的佔比分佈與常態分佈較為接近，其餘鈷、鎳元素的佔比多數分別落在60wt%、40wt%以下，與均勻分佈較接近。至於包含鉻、釩、銅合金的佔比則較低，又以包含銅的高熵合金的實驗資料最少，低於50筆資料。
+
+|      此外，在所有717筆高熵合金資料中，作者根據實驗所使用的金屬元素組合，將其區分為10種不同的合金種類，各類別數量如下圖所示：
+```{r, 2_plot_type, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### View Alloy Type Bar Chart
+combination = c()
+combination$FeNi = c(1:19)
+combination$FeCo = c(20:36)
+combination$NiCo = c(37:49)
+combination$FeNiCo = c(50:110)
+combination$FeCoRr = c(111:203)
+combination$FeCoCrCu = c(204:235)
+combination$FeNiCoCr = c(236:526)
+combination$FeCoNiV = c(526:688)
+combination$FeNiCo_New = c(688:699)
+combination$New_iter = c(700:717)
+type_comb = names(combination)
+type_count = c()
+for (type in type_comb){
+  temp = sum(is.element(as.numeric(row.names(HEA_data)), combination[[type]]))
+  type_count = c(type_count,temp)
+}
+names(type_count) = type_comb
+par(mfrow = c(1,1), mar=c(5.5,4,0.5,0.5), mgp=c(2.7,0.5,0))
+text(x = barplot(type_count, col = "steelblue", 
+                 ylab = "Counts of HEAs", 
+                 ylim = c(0, max(type_count) * 1.2),
+                 cex.main = 1.5, cex.lab = 1.2, cex.axis = 1.2, las=2),
+     y = type_count + 1, labels = type_count, pos = 3, cex = 1.2, col = "black"
+)
+```
+資料集中以鐵鈷鎳鉻合金的數量為最多，鐵鈷鎳釩次之，最少的數量則是鎳鈷合金。
+
+\newpage
+ii. **兩兩變數之間相關性**
+
+|      以下檢視資料中兩兩變數之間的散佈圖形，及計算兩兩變數機的相關係數，變數中我們著重觀察各元素的重量百分比，及與TEC之間的交互關係：
+```{r, 2_plot3, echo=F, fig.align='center', fig.width=8, fig.height=5.75}
+### View Pair Plot
+view.col = c(1, 2, 3, 4, 5, 6, 18)
+par(mfrow = c(1,1), mar=c(0.5,0.5,0.5,0.5), mgp=c(1.7,0.5,0))
+pairs(HEA_data[, view.col], col='blue3', pch=20, cex=0.1, 
+      font.labels=2, cex.labels=1.5, cex.axis=1)
+```
+```{r, 2_plot4, echo=F, fig.align='center', fig.width=4.5, fig.height=4.5}
+### View Correlation
+par(mfrow = c(1,1), mar=c(0,0,0,0), mgp=c(1.7,0.5,0))
+M = cor(HEA_data)
+corrplot(M, method = 'color', mar = c(0, 0, 0, 0))
+```
+檢視兩兩變數的散佈圖形，可以看見鐵、鈷、鎳的分佈都在左下半部，原因來自於重量百分比佈超過1(100wt%)的特性，總和並不會超過一，因此分佈在$y=-x$下方。在元素比例與TEC之間的關係上，鐵與釩元素與TEC有相對較高的相關性，鐵與TEC有負相關的特性，釩與TEC則是正相關，在其他元素上的相關性則不強烈。
+
+|      進一步將TEC數值根據資料的平均值進行類別訂定，資料集中TEC的平均值為$9.745$，高於該數值的資料令為高熱膨脹係數，給定標籤```High```，反之則令為低熱膨脹係數，給定標籤```Low```。
+```{r, 2_plot5, echo=F, fig.align='center', fig.width=8, fig.height=6}
+### Classify High TEC vs Low TEC
+TEC_class  = rep('Low', nrow(HEA_data))
+TEC_class[HEA_data$TEC >= mean(HEA_data$TEC)] = 'High'
+TEC_class = as.factor(TEC_class)
+# Count Label
+cat("Counts of the two labels: ")
+table(TEC_class)
+HEA_data = cbind(HEA_data, TEC_class)
+```
+分類後屬於高TEC組別的資料有409筆，低TEC的資料則有308筆。繪製元素比例與TEC高低類別的箱型圖如下：
+```{r, 2_plot6, echo=F, fig.align='center', fig.width=6, fig.height=5}
+### Boxplot
+box.feat = c('Fe', 'Ni', 'Co' ,'Cr', 'V', 'Cu')
+par(mfrow = c(2,3), mar = c(3.5,3.5,2,0.5), mgp = c(2,0.6,0))
+for (features in box.feat){
+  boxplot(HEA_data[[features]] ~ TEC_class, pch=16, cex = 0.75,
+          main = paste("Boxplot of", features),xlab="TEC Class", ylab="wt%",
+          cex.lab = 1.5, font.lab = 2, cex.main=1.8)
+}
+```
+上圖中元素比例在不同TEC類別下的分佈並不能看出顯著的差異，兩類別的平均十分相近，在這些元素在兩類別的平均上，較能看出有差異的包含了鐵與鈷兩個元素。
+
+|      上方繪製的圖形中，較難看出各金屬元素與熱膨脹係數之間的相關性，推測單獨使用各元素之重量百分比做為特徵，進行機器學習的數值回歸預測，或是進行高低TEC數值得分類任務，出現高預測或分類準確率的機會可能較低。
+
+\newpage
+### **2.3 數據集拆分**
+
+|      高熵合金的數據集中總計有717筆實驗資料，因為在機器學習上訓練與測試資料集的比例，80:20是常見的選擇，因此我們根據該比例，取出原始資料中的140筆資料作為測試資料集，其餘577筆則做為訓練資料集使用。為確保預測模型的泛用性，我們期望測試資料集中預測目標變數的分佈近似於均勻分布(uniform distribution)，因此我們將TEC依照數值範圍分成四份，並在每份中各隨機取35筆資料作為預測資料集，以避免針對整筆資料進行隨機抽樣時，過多測試資料集中在數據之平均值附近。資料在區分訓練集、測試集後的分佈情形如下圖所示。
+```{r, 3_train, echo=F, fig.align='center', fig.width=6, fig.height=3.75}
+### Train/Test Split
+set.seed(9999)
+range = seq(from=min(HEA_data$TEC), to=15, length.out=4)
+range = c(range, max(HEA_data$TEC)-4)
+HEA_train = c()
+HEA_test = c()
+for (i in 1:(length(range)-1)){
+  temp = HEA_data[HEA_data$TEC<=range[i+1] & HEA_data$TEC>range[i],]
+  train_idx = sample(dim(temp)[1], 35)
+  HEA_test = rbind(HEA_test, temp[train_idx,])
+}
+HEA_test = HEA_test[order(as.numeric(row.names(HEA_test))),]
+HEA_train = HEA_data[-as.numeric(row.names(HEA_test)),]
+par(mfrow = c(1,2), mar = c(3,3,2,1), mgp = c(1.8, 0.5, 0))
+hist(HEA_train$TEC, breaks = 20, main='Training Set',
+     xlab='TEC', cex.lab = 1.2, font.lab = 2, cex.main=1.5)
+hist(HEA_test$TEC, breaks = 20, main='Test Set',
+     xlab='TEC', cex.lab = 1.2, font.lab = 2, cex.main=1.5)
+```
+
+```{r, 3_train2, echo=F, fig.align='center', fig.width=6, fig.height=3.25}
+### Check HEA Element Combination
+type_count = c()
+for (type in type_comb){
+  temp = sum(is.element(as.numeric(row.names(HEA_test)), combination[[type]]))
+  temp = temp/length(combination[[type]])
+  type_count = c(type_count,temp)
+}
+
+names(type_count) = type_comb
+par(mfrow = c(1,1), mar=c(5.5,4,0.5,0.5), mgp=c(2.7,0.5,0))
+text(x = barplot(type_count, col = "steelblue", 
+                 ylab = "Fraction of HEAs", 
+                 ylim = c(0, max(type_count) * 1.2),
+                 cex.main = 1.5, cex.lab = 1.2, cex.axis = 1.2, las=2),
+     y=type_count, labels=round(type_count,2),pos = 3, cex = 1, col = "black"
+)
+```
+
+在區分訓練資料集與測試資料集後，我們也檢視了測試集中各個合金種類的佔比，並確保各合金種類的佔比是接近的，以避免在確認模型表現時出現偏差。
+
+|      在完成訓練資料集與測試資料集的劃分後，便能開始進行模型的訓練與擬合，後續章節將針對我們嘗試過的方法進行介紹。
+
+\newpage
+## **三、實驗方法**
+
+|      以下我們嘗試數個回歸與分類模型，希望藉由不同模型的配適與擬合，找出適用於高熵合金數據集中，熱膨脹係數高低的分類模型，與熱膨脹係數數值的回歸預測模型。
+
+### **3.1 高熵合金熱膨脹係數之回歸預測模型**
+
+### i. **Generalized Least Squares Regression** 
+
+
+|      我們首先嘗試線性模型，取用各金屬元素作為回歸模型中的多項式使用，並增加元素的兩兩交互作用項，進行模型配適。
+```{r, 3_OLS1, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### Least Square
+linear.model1 = lm(TEC ~ poly(Fe,3) 
+                   + poly(Ni,3) 
+                   + poly(Co,3) 
+                   + poly(Cr,3)
+                   + poly(V,3)
+                   + poly(Cu,3)
+                   + Fe*Ni
+                   + Fe*Co
+                   + Fe*Cr
+                   + Fe*V
+                   + Fe*Cu
+                   + Ni*Co
+                   + Ni*Cr
+                   + Ni*V
+                   + Ni*Cu
+                   + Co*Cr
+                   + Co*V
+                   + Co*Cu
+                   + Cr*V
+                   + Cr*Cu
+                   + V*Cu, 
+                   data = HEA_train)
+
+summary(linear.model1)
+```
+進行初步模型配適後，挑選模型係數p-value小於0.05的特徵。
+```{r, 3_OLS2, echo=F, fig.align='center', fig.width=6, fig.height=4}
+# Linear model 2: 挑選p-value < 0.05
+linear.model2 = lm(TEC ~ I(Fe^3) + I(Ni^2) + I(Cr^2)
+                   + Fe:Ni
+                   + Ni:Co
+                   + Ni:Cr
+                   + Ni:V,
+                   data = HEA_train)
+
+summary(linear.model2)
+```
+進行第一次挑選後，再根據該模型，刪去p-value不顯著的模型係數。
+```{r, 3_OLS3, echo=F, fig.align='center', fig.width=6, fig.height=4}
+# Linear model 3: 去除p-value不顯著的
+linear.model3 = lm(TEC ~ I(Fe^3) + I(Ni^2) + I(Cr^2)
+                   + Fe:Ni
+                   + Ni:Co
+                   + Ni:V,
+                   data = HEA_train)
+
+summary(linear.model3)
+```
+最終得到的模型為：
+$$
+\begin{aligned}
+\hat{X}_{TEC}&=7.806+6.029X_{Fe}^3+5.572X_{Ni}^2+110.607X_{Cr}^2\\
+&-16.489X_{Fe}X_{Ni}+25.786X_{Ni}X_{Co}+227.034X_{Ni}X_{V}.
+\end{aligned}
+$$
+
+|      得到模型後進行殘差的檢定：
+```{r, 3_OLS_test, echo=F, fig.align='center', fig.width=6, fig.height=4}
+# Residual Plot 
+par(mfrow=c(2,2), mar=c(3.5, 3.5, 2, 0.5), mgp=c(1.7, 0.6, 0))
+plot(linear.model3, pch=20, col='blue3', cex=0.6)
+# Score Test for Heteroscedasticity
+ols_test_score(linear.model3)
+# Checking effect of Auto-correlation
+durbinWatsonTest(linear.model3)
+```
+上方結果中，從Heteroskedasticity test可以知道Linear model變數之間的無論提升Fe、Ni、Co、Cr、V、Cu其中一種，其variance都可以視為homogeneous；從Durbin-Watson test中可以知道Linear model的p-value小於0.05，所以模型的residuals之間有相關性。
+
+|      線性模型在測試資料集上的預測結果如下：
+```{r, 3_OLS_pred, echo=F, fig.align='center', fig.width=6, fig.height=4}
+# Prediction
+pred1 <- predict(linear.model3, HEA_test)
+mse1 <- mean((HEA_test$TEC - pred1)^2)
+cat("MSE of Lasso regression: ", mse1)
+# Plot Prediction
+par(mfrow = c(1,2), mar=c(3,3,3,0.5), mgp=c(1.6,0.5,0))
+plot(HEA_test$TEC, pred1, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Prediction)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(0,20), xlim=c(0,20))
+abline(a=0, b=1, col='red', lwd=2)
+plot(HEA_test$TEC, pred1-HEA_test$TEC, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Error)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(-10,10), xlim=c(0,20))
+abline(h=0, col='red', lwd=2)
+```
+線性模型在測試資料集上的預測誤差MSE為22.76，觀察上方預測結果，發現模型在預測時傾向預測TEC平均附近的數值，預測數值與實際數值之散佈比較圖中的分佈趨於水平，且預測誤差與實際數值的散佈比較圖呈現遞減的情況。
+
+### ii. **Lasso Penalized Regression **  
+
+|      由於OLS線性模型表現不如預期，我們進一步嘗試penalized regression(LASSO)，並與OLS比較，探討何者效果較好。Lasso模型最初選定與線性模型最初相同的變數，在訓練資料上進行10 fold Cross Validation，找出最佳的$\lambda$參數，再進行最佳模型的配適與參數選擇。
+```{r, 3_Lasso, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### Lasso Regression
+library(glmnet)
+set.seed(8964)
+X.train <- model.matrix(TEC ~ poly(Fe,3) 
+                   + poly(Ni,3) 
+                   + poly(Co,3) 
+                   + poly(Cr,3)
+                   + poly(V,3)
+                   + poly(Cu,3)
+                   + Fe*Ni
+                   + Fe*Co
+                   + Fe*Cr
+                   + Fe*V
+                   + Fe*Cu
+                   + Ni*Co
+                   + Ni*Cr
+                   + Ni*V
+                   + Ni*Cu
+                   + Co*Cr
+                   + Co*V
+                   + Co*Cu
+                   + Cr*V
+                   + Cr*Cu
+                   + V*Cu, 
+                   data = HEA_train)
+Y <- HEA_train$TEC
+X.test <- model.matrix(TEC ~ poly(Fe,3) 
+                   + poly(Ni,3) 
+                   + poly(Co,3) 
+                   + poly(Cr,3)
+                   + poly(V,3)
+                   + poly(Cu,3)
+                   + Fe*Ni
+                   + Fe*Co
+                   + Fe*Cr
+                   + Fe*V
+                   + Fe*Cu
+                   + Ni*Co
+                   + Ni*Cr
+                   + Ni*V
+                   + Ni*Cu
+                   + Co*Cr
+                   + Co*V
+                   + Co*Cu
+                   + Cr*V
+                   + Cr*Cu
+                   + V*Cu, 
+                   data = HEA_test)
+# CV to find best lambda
+lambda_seq <- 10^seq(5, -5, length = 100)
+CVLASSO = cv.glmnet(X.train, Y, family = "gaussian", 
+                    nfold = 10,alpha = 1, lambda = lambda_seq)
+par(mfrow = c(1,1), mar=c(3,3,2.5,0.5), mgp=c(1.7,0.5,0))
+plot(CVLASSO)
+optimal_lambda <- CVLASSO$lambda.min
+cat('Minimum lambda for lasso: ', optimal_lambda)
+# Model Train
+model.lasso <- glmnet(X.train, Y, family = "gaussian", alpha = 1,
+                      lambda = optimal_lambda)
+predict(model.lasso, s = optimal_lambda, type = "coefficients")
+# Prediction
+pred1 <- predict(model.lasso, s = optimal_lambda, newx = X.test)
+mse1 <- mean((HEA_test$TEC - pred1)^2)
+cat("MSE of Lasso regression: ", mse1)
+# Plot Prediction
+par(mfrow = c(1,2), mar=c(3,3,3,0.5), mgp=c(1.6,0.5,0))
+plot(HEA_test$TEC, pred1, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Prediction)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(0,20), xlim=c(0,20))
+abline(a=0, b=1, col='red', lwd=2)
+
+plot(HEA_test$TEC, pred1-HEA_test$TEC, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Error)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(-10,10), xlim=c(0,20))
+abline(h=0, col='red', lwd=2)
+```
+經過Lasso 10-fold CV後得到的最佳$\lambda = 0.04329$，最終經過參數選擇後的模型為
+$$
+\begin{aligned}
+\hat{X}_{TEC}&=9.363-4.6X_{Fe}+9.485X_{Fe}^3+2.722X_{Ni}^2+5.907X_{Ni}^3\\
+&+9.871X_{Co}^2-0.7074X_{Co}^3+37.55X_{Cr}^2+2.489X_{Cr}^3\\
+&+12.76X_{V}^2+4.489X_{V}^3+2.718X_{Cu}^2\\
+&-13.14X_{Fe}X_{Ni}+35.77X_{Fe}X_{Cr}+116.3X_{Fe}X_{V}+0.5732X_{Fe}X_{Cu}\\
+&+18.49X_{Ni}X_{Co}+24.61X_{Ni}X_{Cr}-248.8X_{Ni}X_{Cu}\\
+&-39.61X_{Co}X_{Cr}-40.96X_{Co}X_{V}+49.36X_{Co}X_{Cu}+152.1X_{Cr}X_{Cu}
+\end{aligned}
+$$
+在測試資料集上的預測誤差MSE為17.24，檢視預測數值的散佈圖形，先前預測趨於平均的狀況有改善，預測誤差雖有下降，但仍不盡理想。
+
+### iii. **Regression Tree**  
+
+|      先前嘗試的線性模型中，預測誤差MSE皆不盡理想，因此我們改以非線性模型進行配適。以下嘗試regression tree模型，取用六種金屬元素比例進行TEC數值的預測。Regression tree模型首先讓其自由生長，再以10 fold cross validation進行pruning，以簡化樹的複雜程度。
+
+|      最初生長的regression tree如下：
+```{r, 3_tree, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### Regression Tree
+library(tree)
+model.tree = tree(TEC ~ Fe + Ni + Co + Cr + V + Cu,
+                  data = HEA_train)
+summary(model.tree)
+par(mfrow = c(1,1), mar=c(0.5,0.5,0.5,0.5), mgp=c(1.6,0.5,0))
+plot(model.tree, lwd=2)
+text(model.tree, pretty=2, font=2, cex = 0.6)
+# Prediction
+pred1 <- predict(model.tree, HEA_test)
+mse1 <- mean((HEA_test$TEC - pred1)^2)
+cat("MSE of regression tree: ", mse1)
+# Plot Prediction
+par(mfrow = c(1,2), mar=c(3,3,3,0.5), mgp=c(1.6,0.5,0))
+plot(HEA_test$TEC, pred1, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Prediction)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(0,20), xlim=c(0,20))
+abline(a=0, b=1, col='red', lwd=2)
+
+plot(HEA_test$TEC, pred1-HEA_test$TEC, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Error)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(-10,10), xlim=c(0,20))
+abline(h=0, col='red', lwd=2)
+```
+該regression tree模型在測試資料集上的預測誤差MSE為13.24。
+
+|      以下進行10 fold CV及修樹：
+```{r, 3_tree_cv, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### Regression Tree CV
+set.seed(1000)
+HEA.cv = cv.tree(model.tree, K = 10)
+par(mfrow = c(1, 1), mar=c(3,3,2.5,0.5), mgp=c(1.7,0.5,0))
+plot(HEA.cv$size, HEA.cv$dev, 'b',
+     xlab = "Tree Size", ylab = "Deviance", main = "Regression Tree 10 Fold CV",
+     pch = 19, lwd = 2, col = "blue",
+     cex.lab=1.2, cex.axis=1, cex.main=1.5)
+best.size = HEA.cv$size[HEA.cv$dev == min(HEA.cv$dev)]
+cat("Best tree size: ", best.size)
+# Prune
+model.tree.prune <- prune.tree(model.tree, best = best.size)
+plot(model.tree.prune, lwd=2)
+text(model.tree.prune, pretty=2, font=2, cex = 0.6)
+# Prediction
+pred1 <- predict(model.tree.prune, HEA_test)
+mse1 <- mean((HEA_test$TEC - pred1)^2)
+cat("MSE of regression tree: ", mse1)
+# Plot Prediction
+par(mfrow = c(1,2), mar=c(3,3,3,0.5), mgp=c(1.6,0.5,0))
+plot(HEA_test$TEC, pred1, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Prediction)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(0,20), xlim=c(0,20))
+abline(a=0, b=1, col='red', lwd=2)
+
+plot(HEA_test$TEC, pred1-HEA_test$TEC, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Error)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(-10,10), xlim=c(0,20))
+abline(h=0, col='red', lwd=2)
+```
+CV得到的結果是樹的大小為17，修數後得到的預測誤差MSE為13.26。
+
+### iv. **Bagging**
+
+|      基於regression tree的方法上，我們進一步嘗試Bagging的方法，希望藉此近一步降低預測誤差。Bagging的方法上我們設定100棵樹。
+```{r, 3_bagging, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### Bagging
+set.seed(1000)
+library(randomForest)
+model.bag = randomForest(TEC ~ Fe + Ni + Co + Cr + V + Cu, data = HEA_train,
+                         mtry = 6, ntree = 100, importance = T)
+# Prediction
+pred1 <- predict(model.bag, HEA_test)
+mse1 <- mean((HEA_test$TEC - pred1)^2)
+cat("MSE of regression tree: ", mse1)
+# Importance
+cat("Importance of Parameters:")
+importance(model.bag)
+# Plot Prediction
+par(mfrow = c(1,2), mar=c(3,3,3,0.5), mgp=c(1.6,0.5,0))
+plot(HEA_test$TEC, pred1, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Prediction)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(0,20), xlim=c(0,20))
+abline(a=0, b=1, col='red', lwd=2)
+
+plot(HEA_test$TEC, pred1-HEA_test$TEC, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Error)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(-10,10), xlim=c(0,20))
+abline(h=0, col='red', lwd=2)
+```
+Bagging方法在測試資料集上的預測誤差MSE為6.541，數值較先前的結果有顯著程度的下降，且預測數值與實際數值的分佈情形中，更貼近的$x=y$的直線，顯示該模型更有能力預測TEC的數值。根據模型的配適結果，我們發現鐵與鉻元素對於數值預測時有較大的影響力。進一步檢視預測誤差與實際數值的分佈情形，發現該分佈呈現負向的相關性，模型所預測的數值，在TEC數值較小時傾向高估，TEC數值較大時則傾向低估，後續我們將設法解決該狀況。
+
+### v. **XGBoost**
+
+|      對於TEC數值的回歸預測模型，我們最後嘗試XGBoost的方法。相較於Bagging所是抽樣的方式生成樹，每棵樹彼此獨立，Boosting是透過序列的方式生成樹，後面生成的樹會與前一棵樹相關。希望藉由Boosting可以改善前一棵樹的錯誤。這裡選用比一般Gradient Boosting多了L1/L2 regularization的XGBoost，以減緩雜訊對於擬合的影響。  
+```{r, 3_XGBoost, echo=F, fig.align='center', fig.width=6, fig.height=4}
+set.seed(2023)
+library(xgboost)
+xgb_train = xgb.DMatrix(data = data.matrix(HEA_train[,1:6]), 
+                        label = data.matrix(HEA_train[['TEC']]))
+xgb_test = xgb.DMatrix(data = data.matrix(HEA_test[,1:6]), 
+                       label = data.matrix(HEA_test[['TEC']]))
+#define watchlist
+watchlist = list(train=xgb_train, test=xgb_test)
+#fit XGBoost model and display training and testing data at each round
+model = xgb.train(data = xgb_train, max.depth = 15, 
+                  watchlist=watchlist, nrounds = 500, verbose = 0)
+cat("Min RMSE iteration [Train]: ", which.min(model$evaluation_log$train_rmse))
+cat("Min RMSE iteration [Test]: ", which.min(model$evaluation_log$test_rmse))
+#define final model
+xgb.final = xgboost(data = xgb_train, max.depth = 15, nrounds = 60, verbose = 0)
+#Partial dependence plots
+importance_matrix=xgb.importance(colnames(xgb_train), model = xgb.final)
+par(mfrow = c(1,1), mar=c(2,0,3,0.5), mgp=c(1.6,0.5,0))
+xgb.plot.importance(importance_matrix, 
+                    main='Partial Dependence Plot',cex.main=1.5)
+# Prediction
+pred1 = predict(xgb.final, xgb_test)
+mse1 <- mean((HEA_test$TEC - pred1)^2)
+cat("MSE of boosting: ", mse1)
+# Plot Prediction
+par(mfrow = c(1,2), mar=c(3,3,3,0.5), mgp=c(1.6,0.5,0))
+plot(HEA_test$TEC, pred1, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Prediction)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(0,20), xlim=c(0,20))
+abline(a=0, b=1, col='red', lwd=2)
+
+plot(HEA_test$TEC, pred1-HEA_test$TEC, pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Error)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(-10,10), xlim=c(0,20))
+abline(h=0, col='red', lwd=2)
+```
+XGBoost模型在測試資料集上的預測誤差MSE為5.939，數值又比先前Bagging預測的更低，然而預測情形上仍出現TEC數值較小時傾向高估、TEC數值較大時則傾向低估的狀況。
+
+\newpage
+### **3.2 高熵合金熱膨脹係數高低之分類模型**
+
+|      先前在TEC的數值回歸模型中，我們發現在預測時，若實際TEC數值較小傾向高估，TEC實際數值較大時則傾向低估。為解決該狀況，我們希望藉由先分類再回歸的方法，期望改善在不同TEC高低數值中預測出現偏差的情形。預測時我們將先針對TEC的數值高低進行分類，再根據預測的高低組別分別進行模型的擬合，透過兩個不同的模型進行數值預測。
+
+|      以下為分類模型的實作結果，章節3.3則是綜合分類與回歸模型的嘗試。
+
+### i. **Naive Bayes**
+
+|      熱膨脹係數高低的分類模型，我們首先嘗試Naive Bayes模型，同樣取用各元素的重量百分比作為輸入特徵，以預測TEC數值的高低組別。
+```{r, 3_NB, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### Naive Bayes Model
+NB.model <- naiveBayes(TEC_class ~ Fe + Ni + Co + Cr + V + Cu, 
+                 data = HEA_train)
+NB.model
+NB.pred <- predict(NB.model, HEA_test)
+# Confusion Matrix
+cat("Confusion Matrix:")
+confmat <- table(NB.pred, HEA_test$TEC_class)
+confmat
+cat("Accuracy of Naive Bayes: ", mean(NB.pred == HEA_test$TEC_class))
+par(mfrow = c(1,1), mar=c(3.25,3.5,3,0.5), mgp=c(1.8,0.7,0))
+plot(HEA_test$TEC, (1.5-as.numeric(NB.pred))*2, pch=19, col='blue', cex=0.5,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='Predicted Class',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, 
+     ylim=c(-2,2), yaxt="n", xlim=c(0,20))
+axis(2, at=c(-1,1), labels=c("Low", "High"))
+abline(v=mean(HEA_data$TEC), col='red', lty=2, lwd=2)
+```
+Navie Bayes在預測TEC高低類別的準確率為67.14%，檢視confusion matrix後發現在低TEC組別上預測的表現較佳，錯誤率較另一個組別低。
+
+### ii. **LDA**
+
+|      Naive Bayes模型上的預測表現，若根據該預測結果分別進行不同模型的數值回歸，我們推測較高的預測錯誤率將導致回歸模型預測效果下降。因此我們進一步嘗試不同模型，檢視預測類別的效果是否有所提升。以下嘗試LDA模型，同樣取用六個金屬元素作為特徵進行模型訓練。
+```{r, 3_QDA, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### LDA model
+library(MASS)
+lda.model <- lda(TEC_class ~ Fe + Ni + Co + Cr + V + Cu, 
+                 data = HEA_train)
+lda.model
+lda.pred <- predict(lda.model, HEA_test)
+# Confusion Matrix
+cat("Confusion Matrix:")
+confmat <- table(lda.pred$class, HEA_test$TEC_class)
+confmat
+cat("Accuracy of LDA: ", mean(lda.pred$class == HEA_test$TEC_class))
+par(mfrow = c(1,1), mar=c(3.25,3.5,3,0.5), mgp=c(1.8,0.7,0))
+plot(HEA_test$TEC, (1.5-as.numeric(lda.pred$class))*2, 
+     pch=19, col='blue', cex=0.5,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='Predicted Class',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, 
+     ylim=c(-2,2), yaxt="n", xlim=c(0,20))
+axis(2, at=c(-1,1), labels=c("Low", "High"))
+abline(v=mean(HEA_data$TEC), col='red', lty=2, lwd=2)
+```
+LDA在預測TEC高低類別的準確率為59.29%，效果不比Naive Bayes模型。檢視預測情形與實際數值的關係圖，推斷透過LDA模型預測TEC高低，其結果與隨機分類相差不遠。
+
+### iii. **K Nearest Neighbor**
+
+|      最後我們嘗試KNN模型。在挑選最近鄰居K的數值上，我們透過10-fold cross validation進行挑選，並選定最佳的k值進行最終模型的配適。
+```{r, 3_knn, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### LDA model
+set.seed(9999)
+# KNN CV
+ctrl <- trainControl(method="cv", number=10)
+nn_grid <- expand.grid(k=c(1,3,5,7,9))
+best_knn <- train(TEC_class ~ Fe + Ni + Co + Cr + V + Cu, data = HEA_train,
+                  method="knn", trControl=ctrl, tuneGrid=nn_grid,
+                  preProcess = c("center", "scale"))
+cat("Result of cross validation:")
+best_knn
+# KNN best model
+library(class)
+knn.pred <- knn(as.matrix(HEA_train[,1:6]), 
+                as.matrix(HEA_test[,1:6]), HEA_train$TEC_class, k=3)
+# Confusion Matrix
+cat("Confusion Matrix:")
+confmat <- table(knn.pred, HEA_test$TEC_class)
+confmat
+cat("Accuracy of KNN: ", mean(knn.pred == HEA_test$TEC_class))
+par(mfrow = c(1,1), mar=c(3.25,3.5,3,0.5), mgp=c(1.8,0.7,0))
+plot(HEA_test$TEC, (1.5-as.numeric(knn.pred))*2, pch=19, col='blue', cex=0.5,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='Predicted Class',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, 
+     ylim=c(-2,2), yaxt="n", xlim=c(0,20))
+axis(2, at=c(-1,1), labels=c("Low", "High"))
+abline(v=mean(HEA_data$TEC), col='red', lty=2, lwd=2)
+```
+最終透過cross validation挑選到的k為$k=3$，在預測TEC高低類別的準確率為89.29%，預測準確率較先前方法有大幅度的提升，因此我們決定以KNN作為後續回歸預測前的分類模型。
+
+\newpage
+### **3.3 綜合分類與回歸之高熵合金熱膨脹係數預測模型**
+
+|      在配適完高熵合金的熱膨脹係數回歸模型後，我們發現部分模型在TEC數值高低時表現有差異，因此我們嘗試先分類再進行回歸預測。分類與回歸所使用的模型，皆取用先前單獨進行時表現最好的，分類上選擇KNN、回歸則使用XGBoost。實際模擬結果如下：
+```{r, 3_KNN+Bagging, echo=F, fig.align='center', fig.width=6, fig.height=4}
+### Classification then Regression
+set.seed(1)
+# Classification: KNN
+knn.pred <- knn(as.matrix(HEA_train[,1:6]), 
+                as.matrix(HEA_test[,1:6]), HEA_train$TEC_class, k=3)
+cat("Accuracy of KNN: ", mean(knn.pred == HEA_test$TEC_class))
+
+# Regression: XGBoost
+set.seed(1000)
+xgb_high_train = xgb.DMatrix(
+  data = data.matrix(HEA_train[HEA_train$TEC_class == 'High',1:6]), 
+  label = data.matrix(HEA_train[HEA_train$TEC_class == 'High',18]))
+xgb_high_test = xgb.DMatrix(
+  data = data.matrix(HEA_test[knn.pred == 'High',1:6]), 
+  label = data.matrix(HEA_test[knn.pred == 'High',18]))
+xgb_low_train = xgb.DMatrix(
+  data = data.matrix(HEA_train[HEA_train$TEC_class == 'Low',1:6]), 
+  label = data.matrix(HEA_train[HEA_train$TEC_class == 'Low',18]))
+xgb_low_test = xgb.DMatrix(
+  data = data.matrix(HEA_test[knn.pred == 'Low',1:6]), 
+  label = data.matrix(HEA_test[knn.pred == 'Low',18]))
+high.watchlist=list(train=xgb_high_train,test=xgb_high_test)
+low.watchlist=list(train=xgb_low_train,test=xgb_low_test)
+
+# XGBoost - High TEC
+cat("XGBoost model for High TEC")
+model.xgb_high = xgb.train(data = xgb_high_train,
+                           max.depth =15,
+                           watchlist=high.watchlist,
+                           nrounds =500,
+                           verbose =0)
+
+cat("Min RMSE iteration [Train]: ", 
+    which.min(model.xgb_high$evaluation_log$train_rmse))
+
+model.xgb_high = xgb.train(data = xgb_high_train,
+                           max.depth =15,
+                           watchlist=high.watchlist,
+                           nrounds =60,
+                           verbose =0)
+
+pred.high = predict(model.xgb_high, xgb_high_test)
+error.high = (HEA_test[knn.pred == 'High',18]-pred.high)^2
+cat("MSE of XGBoost (Predicted High TEC): ", mean(error.high))
+
+# XGBoost - Low TEC
+cat("XGBoost model for Low TEC")
+model.xgb_low = xgb.train(data = xgb_low_train,
+                           max.depth =15,
+                           watchlist=low.watchlist,
+                           nrounds =500,
+                           verbose =0)
+
+cat("Min RMSE iteration [Train]: ", 
+    which.min(model.xgb_low$evaluation_log$train_rmse))
+
+model.xgb_low = xgb.train(data = xgb_low_train,
+                           max.depth =15,
+                           watchlist=low.watchlist,
+                           nrounds =60,
+                           verbose =0)
+
+pred.low = predict(model.xgb_low, xgb_low_test)
+error.low = (HEA_test[knn.pred == 'Low',18]-pred.low)^2
+cat("MSE of XGBoost (Predicted Low TEC): ", mean(error.low))
+
+mse1 <- mean(c(error.high, error.low))
+cat("MSE of XGBoost: ", mse1)
+
+# Plot Prediction
+par(mfrow = c(1,2), mar=c(3,3,3,0.5), mgp=c(1.6,0.5,0))
+plot(HEA_test[knn.pred == 'High',]$TEC, pred.high, 
+     pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Prediction)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(0,20), xlim=c(0,20))
+points(HEA_test[knn.pred == 'Low',]$TEC, pred.low, 
+       pch=19, col='blue', cex=0.75,)
+abline(a=0, b=1, col='red', lwd=2)
+plot(HEA_test[knn.pred == 'High',]$TEC, 
+     pred.high-HEA_test[knn.pred == 'High',]$TEC,
+     pch=19, col='blue', cex=0.75, asp=1,
+     main='Prediction', xlab='TEC (Ground Truth)', ylab='TEC (Error)',
+     cex.lab = 1.2, font.lab = 2, cex.main=1.5, ylim=c(-10,10), xlim=c(0,20))
+points(HEA_test[knn.pred == 'Low',]$TEC, 
+       pred.low-HEA_test[knn.pred == 'Low',]$TEC,
+       pch=19, col='blue', cex=0.75)
+abline(h=0, col='red', lwd=2)
+```
+最終該模型在熱膨脹係數預測上，誤差MSE為5.558，較先前模型都低，且該模型也減緩了數值高低時表現有差異的現象。
+
+\newpage
+## **四、結果與討論**
+
+### **4.1 高熵合金熱膨脹係數之回歸預測模型**
+
+i. **Generalized Least Squares Regression**  
+
+|      最小平方回歸法目標是降低配適模型的殘差平方和(Residual sum of squares, RSS)  
+$$
+\underset{\pmb{\beta}\in\mathbb{R}^p}{\mathrm{min}}\|\pmb{Y}-\pmb{X\beta}\|^2=\underset{\pmb{\beta}\in\mathbb{R}^p}{\mathrm{min}}(\pmb{Y}-\pmb{X\beta})'(\pmb{Y}-\pmb{X\beta})
+$$
+最小平方回歸法對於預測變數的選擇依賴係數的顯著性，多種預測變數有數種組合，而各組合對應的係數不盡相同，因此較難以手動的方式選出正確的且複雜的線性組合。最小平方回歸方法對於反應變數的描述只有多項式與變數之間的交互作用項。若要描述非線性之關係，可能需要進行多項次的疊加，但在多種預測變數下，也無法準確知道疊加需要的最高次方與變數組合，所以較難預估出變數之間的關聯性，也導致預估出的模型無法通過統計測試，例如殘差之間的相關性測試。  
+
+ii. **Lasso Penalized Regression**  
+
+|      與最小平方回歸法相比，LASSO回歸是RSS加上L1懲罰項，即  
+$$
+PRSS(\beta)_{l_1}=\sum_{i=1}^n(y_i-\pmb{x}_i\beta)^2+\lambda\sum_{j=1}^p|\beta_j|.
+$$
+隨著參數$\lambda$提升，為了最小化PRSS，係數$\beta_j$會逐漸下降。與ridge回歸不同的是LASSO 回歸在配適過程中對於不顯著的係數可以直接降至零，無須再手工選擇係數顯著性，降低選擇配適模型的不確定性。也因為L1 懲罰項的關係，雖然讓LASSO回歸有biased的特性，但相對也降低模型對資料variance的敏感度，所以可以降低測試資料的MSE。但LASSO回歸與殘差的關係也會因為變數選擇而有所不同。因為無法準確以線性組合描述原子濃度與TEC的關係，經過LASSO回歸配適出的模型有可能無法通過統計測試，例如殘差之間的相關性測試與殘差variance的Breusch–Pagan test。
+
+|      因為LASSO回歸的L1懲罰項只包含預測變數的係數並不包含截距項，所以配適出的截距為9.363。代表當所有原子重量濃度為零時，TEC為9.363。若要移除截距項，可以先對預測變數標準化，即調整預測變數至$N(0,1)$分布。  
+
+iii. **Regression Tree**  
+
+|      Regression tree可以分為兩部分：(i)建立一棵最大、節點最多的樹。(ii)利用cost complexity pruning和cross-validation找尋最佳$\alpha$與對應的subtree。若所以變數皆為連續，可在每個變數中找到一值$s$，將特徵空間分成$\{X|X_j<s\}$和$\{X|X_j>s\}$。最終目的是將特徵空間切割成$R_j$個子空間，使得
+$$
+RSS=\sum_{j=1}^J\sum_{i\in R_j}(y_i-\hat{y}_{R_j})^2
+$$
+有最小值。其中$\hat{y}_{R_j}$代表落在落在第j個子空間中，訓練資料的反應變數平均。藉由這樣的步驟不斷在變數之間取分割點$s$直到子空間中的資料少到不足以在切割或是樹的節點已到達最大值。  
+
+|      建立完最大顆的樹$T_0$後，接著使用cost complexity parameter $\alpha$修剪原本的樹。對於每個subtree $T\subset T_0$有對應的$\alpha$使得
+$$
+\sum_{m=1}^{|\tilde{T}|}\sum_{i:x_i\in R_m}(y_i-\hat{y}_{R_m})^2+\alpha|\tilde{T}|
+$$
+有最小值，其中$|\tilde{T}|$代表subtree $T$的節點數。意即當$\alpha=0$時，懲罰項為零，對應最小的RSS就是最大顆的樹$T_0$；增加$\alpha$至$\alpha=a_1$時，對應最小的PRSS是subtree $T_1$；增加$\alpha$至$\alpha=a_2$時，對應最小的PRSS是subtree $T_2$，以此類推，直到最後的subtree只有一個節點，所以不同$\alpha$對應的subtree節點樹皆不同。  
+
+|      接著利用10-fold cross-validation決定最佳的$\alpha$為何。將原始訓練資料分成10份訓練子集，取其中9份訓練子集訓練各個$\alpha$的subtree，取最後一份訓練子集計算各個$\alpha$的subtree RSS。每個$\alpha$對應的subtree都有10個交叉驗證後的RSS，計算RSS平均後，取最小RSS平均對應的$\alpha$與對應的subtree。該subtree架構就是這份資料最適合的regression tree架構，
+
+iv. **Bagging**  
+
+|      若訓練資料$(x_i,\,y_i),\,i=1,\dots.n$，樹數量$B=100$，Bagging就是隨機抽取訓練資料$(x_i^{*b},\,y_i^{*b}),\,i=1,\dots,n,\,b=1,\dots,B$並平行訓練多棵classification tree，最後再以多數決或是平均的方法決定新資料$x\in \mathbb{R}^p$預測結果。  
+$$
+\hat{f}^{bag}(x)=\underset{k=1,\dots,K}{\mathrm{argmax}}\sum_{b=1}^B1\{\hat{f}^{tree,b}(x)=k\}
+$$
+Bagging的優勢主要在於能抽取不同訓練資料的子集合並學習部分資料的趨勢，再加上多數決的機制，提升整體預測的準確度。也因為訓練資料來自不同訓練資料的子集合，Bagging能有效降低資料中的variance，增加配適模型的穩固性。
+
+v. **XGBoost**  
+
+|      與Bagging相異之處是XGBoost保有gradient boosting的作法，且每一棵樹是互相有關連性的，使後面生成的樹能夠修正前面一棵樹的殘差。XGBoost模型在訓練時為了擬合訓練資料，會產生很多高次項的函數，但反而容易被雜訊干擾導致過度擬合。因此 L1/L2 正規化目的是讓損失函數更佳平滑，且抗雜訊干擾能力更大。
+
+XGBoost回歸演算法的步驟主要可以分解成：  
+
+1. XGBoost會先假設所有原子重量濃度的TEC是同一個值，接著計算各原子重量濃度組合的真實TEC值與這個initial guess的殘差。  
+2. 接著這些殘差會被收集在initial node中用來計算$\mathrm{Similarity\, Score}=\frac{(\mathrm{Sum\,of\,Residuals})^2}{\mathrm{number\,of\,Residuals}+\lambda}$，其中$\lambda$是penalty term。接著根據不同threshold value切割訓練資料的特徵空間，得到不同分類的XGBoost tree。同樣計算樹中不同節點的Similarity Score，並計算子代與親代的$\mathrm{Gain}=\mathrm{Left\,Similarity} + \mathrm{Right\,Similarity} - \mathrm{Root\,Similarity}$，最後保留Gain最高的樹。  
+3. 繼續切割訓練資料的特徵空間直到深度最大值或是特徵空間無法再切割，並計算每一個節點的Gain。  
+4. 接著對樹進行修剪。這裡定義參數$\gamma$作為修剪節點的門檻，由下往上修剪。如果$\mathrm{Gain}<\gamma$，該分支就會去除；如果$\mathrm{Gain}>\gamma$，該分支就會保留。只要下層的Gain大於$\gamma$，即使上層的Gain小於$\gamma$，也不會被修剪掉。從這裡可以看出Similarity Score中的$\lambda$如果越大，連帶降低Similarity Score和Gain，被修剪掉的機率就會越高。  
+5. 經過修剪後，計算每個子空間的Similarity Score作為Output。  
+6. 最後更新TEC預測值：$\hat{TEC}=\mathrm{Initial\,Guess}+\mathrm{learning\,rate}\times$對應特徵子空間的$\mathrm{output}$。由此計算不同原子重量濃度的新TEC值，再利用新TEC與真實TEC值之間的殘差，重複第一步驟。  
+
+### **4.2 高熵合金熱膨脹係數高低之分類模型**
+
+i. **KNN**  
+
+|      在訓練資料已經分類完的情況下，套用KNN分類模型至測試資料中，就能計算距離每筆測試資料k個相近的分類，本報告使用最常見的Euclidean distance  
+$$
+d(X_{test},\,X_{train})=\sqrt{\Sigma_{j=1}^p(X_{j,\,train}-X_{j,\,test})^2}
+$$  
+本報告挑選$k=3$，即距離測試資料最近至第三近的類別，並以投票決定分類。  
+
+ii. **LDA**  
+
+|      利用LDA分類模型將測試資料的TEC分為"High"與"Low"兩種類別，因為預測變數為六種原子重量濃度，所以概念上類似在六維空間中建立一平面，將所有資料點投影在此平面上，目標是將類別"High"與類別"Low"的平均分離越遠，類別"High"與類別"Low"各自類別資料的散佈越近，才能清楚分辨不同類別。
+
+|      假設兩種類別的分類是multivariate Gaussian分布  
+$$
+P(X=x|Y=k)=\frac{1}{(2\pi)_{p/2}|\Sigma_k|^{1/2}}e^{-\frac{1}{2}(x-\mu_k)^T\Sigma_k^{-1}(x-\mu_k)}
+$$
+其中$X=(X_{Fe},\,X_{Ni},\,X_{Co},\,X_{Cr},\,X_{V},\,X_{Cu})$，$Y=(\mathrm{High},\,\mathrm{Low})$，$\mu_k=E(X|Y=k)$是一個$6\times1$的向量，$\Sigma_k=Var(X|Y=k)$是$k\times k$的矩陣。在LDA的假設下兩個joint distribution $P(X=x|Y=\mathrm{High})$與$P(X=x|Y=\mathrm{Low})$的covariance matrix相同。  
+
+|      所以比較兩種類別的log-odds function後可以算出linear discriminant functions  
+$$
+\delta_k(x)=x^T\Sigma^{-1}\mu_k-\frac{1}{2}\mu_k^T\Sigma^{-1}\mu_k+\mathrm{log}\,P(Y=k)
+$$  
+如果有新資料$(x^*,\,y^*)$，帶入上式後如果$\delta_{k=\mathrm{High}}(x^*)>\delta_{k=\mathrm{Low}}(x^*)$，就能預測$y^*=\mathrm{High}$。  
+
+|      從結果可以看出LDA分類結果接近六成，推測原因與分類的prior和$\mu_k$有關。"High"與"Low"類別的prior因為是取TEC平均值做分界，所以prior的佔比是接近的六比四。而各類別的原子重量濃度平均也相當接近，除了Cr與V原子。因次造成最後LDA分類準確度只有接近六成。  
+
+iii. **Naive Bayes**  
+
+|      Naive Bayes分類模型主要先計算訓練資料的prior與conditional probability，同時Naive Bayes分類模型假設預測變數之間是conditional independence，即  
+$$
+P(X_1,\dots,X_p|\,Y)=\prod_{j=1}^pP(X_j|\,Y)
+$$  
+所以在給定測試資料的原子重量濃度條件下，該筆測試資料的分類  
+$$
+y_k=\underset{y}{\mathrm{argmax}}\,P(Y=y)\prod_{j=1}^pP(X_j|\,Y=y)
+$$  
+
+|      分類結果與LDA相似，同樣計算訓練資料的prior，而Naive Bayes多了conditional probability。觀察conditional probability可以發現各元素除了Cr與V之外，在兩個類別中的分布都很接近，所以才會造成分類準確度只有將近六成。   
+
+## **五、結論**
+
+|      在本次期末專題中，我們利用過往期刊所發表的高熵合金數據集，搭配本學期在課程中學到的回歸與分類模型，透過各項金屬元素的重量百分比例，以預測高熵合金的熱膨脹係數(TEC)。總結我們所使用的回歸預測模型，我們發現透過先將TEC數值依照高低程度進行分類，再分別以高、低組別所訓練的模型進行預測，有最好的預測效果。在分類模型上，我們使用的是非線性的K-近鄰演算法(k-nearest neighbors, KNN)，該方法能很直觀的在特徵空間中對資料進行分類；在數值的回歸預測上則是使用XGBoost的方法，能夠有效率得對特徵進行回歸預測，且有較佳的抗雜訊能力。綜合使用兩種方法，先進行分類再進行回歸，模型在測試資料集上的預測表現良好，均方誤差(mean square error)為5.558，是我們嘗試的所有模型中最低的。
+
+|      我們提出的模型在測試集上的MSE誤差為5.558，若希望進一步將誤差降低，我們推測可以引入各個金屬元素的材料特性參數，如元素本身的蒲松比(Poisson's ratio)、楊氏模數(Young's modulus)等，將其作為特徵輸入模型進行訓練與預測；抑或是尋找適用於估算TEC數值的物理公式，以進行physics-informed machine learning的模型訓練，透過引入估測函數以限制最佳化使用的函數，達到較好的預測效果。
+
+|      最後，僅僅只有透過金屬元素比例以預測材料特性參數(TEC)，我們認為對於實際研究及產業上的應用仍有限。在只有預測特性參數模型的情況下，仍續透過手動嘗試不同金屬元素的比例組合，一一放入模型得到材料特性之數值。我們期望未來能引入最佳化的演算法，如梯度下降法(gradient descent)或是基因演算法(genetic algorithm)，在我們期望的材料特性範圍內，透過最佳化方法的搜尋，搭配特性預測模型，直接找出符合條件的金屬元素比例，以減少人工輸入數值一一預測所需要消耗的時間與精力。
+
+\newpage
+## **Appendix: Code Used in the Final Project**
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
